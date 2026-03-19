@@ -15,7 +15,7 @@ This project introduces an innovative approach to digital learning by combining 
 ## 🟢 Technologies
 * **Frontend:** HTML, CSS, JavaScript
 * **Backend:** Node.js / PHP
-* **Database:** MySQL / MongoDB
+* **Database:** MySQL
 * **API Integration:** OpenAI API or any NLP-based chatbot API
 * **Tools:** VS Code
 * **Optional:** Bootstrap (for UI design)
