@@ -1,0 +1,2163 @@
+AI-Based Study Assistant Chatbot
+
+Document Metadata
+
+
+Project Title
+AI-Based Study Assistant Chatbot
+Document Type
+Software Design Document (SDD)
+Version
+1.0
+Standard
+IEEE 1016-2009 Compliant
+Status
+Final Draft
+Repository
+github.com/SHUMAILA4023/AI-Based-Study-Assistant-Chatbot
+Related Documents
+Project Proposal, SRS Report
+
+
+📑 Table of Contents
+Introduction
+System Overview
+Design Considerations
+Architectural Design
+Detailed Design
+Data Design
+Interface Design
+Security Design
+Performance & Scalability Design
+Error Handling & Logging
+Testing Strategy
+Deployment & Maintenance
+Traceability Matrix
+Appendices
+
+1. INTRODUCTION
+1.1 Purpose of the SDD
+This Software Design Document (SDD) describes the architectural and detailed design of the AI-Based Study Assistant Chatbot, an intelligent web application providing real-time academic assistance to students through a conversational interface. The document translates the requirements defined in the Software Requirements Specification (SRS) into a concrete, implementable software design.
+This SDD serves the following audiences:
+Software Engineers — as a blueprint for implementation of frontend, backend, database, and integration layers.
+Quality Assurance Engineers — as a reference for designing test cases mapped to architectural components.
+DevOps Engineers — as a guide for infrastructure provisioning, deployment, and monitoring.
+Project Stakeholders & Supervisors — as evidence that the requirements have been thoughtfully transformed into a viable technical solution.
+Future Maintainers — as institutional knowledge for evolution and extension of the system.
+The document adheres to IEEE Std 1016-2009 (Standard for Information Technology — Systems Design — Software Design Descriptions), while pragmatically extending it with modern web-architecture concerns such as containerization, CI/CD, and AI service integration.
+1.2 Scope of the System
+The system being designed is a multi-tenant, single-page web application that enables authenticated students to converse with a Large Language Model (LLM) via a moderated, context-aware chat interface. The scope includes:
+In-Scope:
+Student account lifecycle (registration → email verification → login → profile management → password reset).
+Real-time messaging UI with token-by-token streaming responses.
+Persistent, searchable chat history organized into conversations.
+Server-side integration with the OpenAI Chat Completions API (default provider) with provider-abstraction for future swaps.
+Prompt sanitization, content moderation, and context-window management.
+An administrative subsystem for user management, dashboard metrics, and flagged-content review.
+Responsive UI compatible with viewports 320px–1920px+.
+Out-of-Scope (deferred to future versions):
+Multimedia generation/ingestion (images, audio, video).
+Native mobile applications (the responsive web app serves mobile needs).
+LMS integration (Moodle, Canvas, etc.).
+Offline-first capabilities.
+Real-time human tutoring or video conferencing.
+1.3 Definitions, Acronyms & Abbreviations
+Term
+Definition
+SDD
+Software Design Document
+SRS
+Software Requirements Specification
+LLM
+Large Language Model (e.g., GPT-4o-mini)
+NLP
+Natural Language Processing
+API
+Application Programming Interface
+REST
+Representational State Transfer
+JWT
+JSON Web Token
+RBAC
+Role-Based Access Control
+PII
+Personally Identifiable Information
+TTFB
+Time To First Byte
+SSE
+Server-Sent Events
+ORM
+Object-Relational Mapper
+DTO
+Data Transfer Object
+CI/CD
+Continuous Integration / Continuous Deployment
+WCAG
+Web Content Accessibility Guidelines
+RPO/RTO
+Recovery Point / Recovery Time Objective
+MVC
+Model-View-Controller
+DAO
+Data Access Object
+
+1.4 References
+Project Proposal — AI-Based Study Assistant Chatbot, 2025.
+SRS Report — SRS.md on GitHub.
+IEEE Std 1016-2009 — Standard for Software Design Descriptions.
+OpenAI API Reference — https://platform.openai.com/docs/api-reference
+OWASP Top 10 (2021) — https://owasp.org/Top10/
+WCAG 2.1 Guidelines — https://www.w3.org/TR/WCAG21/
+RFC 7519 — JSON Web Token (JWT).
+RFC 6749 — OAuth 2.0 Authorization Framework.
+1.5 Document Overview
+Section 2 establishes the system context. Section 3 captures design-time considerations and risks. Section 4 presents the architectural design — the bird’s-eye view. Section 5 zooms in with module-level detail. Sections 6–10 cover specialized cross-cutting concerns (data, interface, security, performance, error handling). Sections 11–12 describe quality assurance and operational lifecycle. Section 13 provides explicit traceability back to the SRS, and Section 14 supplies supporting reference material.
+
+2. SYSTEM OVERVIEW
+2.1 System Context & Background
+In contemporary higher education, the asynchronous nature of self-study creates a “knowledge gap window” — students encounter conceptual obstacles outside of formal class hours and lack immediate scaffolding to overcome them. Existing solutions (e.g., search engines, static FAQs, peer forums) suffer from low precision, latency, or social friction. The emergence of capable LLMs makes it feasible to deliver a personalized, conversational tutor at scale.
+The AI-Based Study Assistant Chatbot positions itself as a thin, opinionated layer on top of a general-purpose LLM, with three distinguishing characteristics:
+Academic Framing — Through a curated system prompt (FR-19), the assistant is constrained to a pedagogical persona, reducing the likelihood of off-topic or inappropriate responses.
+Conversation Continuity — Persistent, per-user history (FR-13–FR-17) enables longitudinal learning rather than disconnected one-shot queries.
+Safety & Privacy by Design — PII stripping (FR-18) and content moderation (FR-12) protect both the student and the institution.
+graph LR
+    subgraph "External Environment"
+        S[Student<br/>Browser]
+        A[Admin<br/>Browser]
+        AI[OpenAI<br/>API]
+        SMTP[SMTP<br/>Provider]
+    end
+
+    subgraph "System Boundary"
+        APP[AI Study<br/>Assistant<br/>Chatbot]
+    end
+
+    S -->|HTTPS<br/>chat queries| APP
+    A -->|HTTPS<br/>admin ops| APP
+    APP -->|HTTPS<br/>prompt + context| AI
+    AI -->|streamed tokens| APP
+    APP -->|verification<br/>& reset emails| SMTP
+
+    style APP fill:#4A90E2,stroke:#2C3E50,color:#fff
+    style AI fill:#10A37F,stroke:#0E8C6E,color:#fff
+    style SMTP fill:#E67E22,stroke:#BA6219,color:#fff
+
+2.2 Design Goals & Objectives
+The design is optimized — in priority order — for the following qualities:
+Priority
+Goal
+Driving Requirement
+1
+Correctness & Safety of AI output
+FR-12, FR-18, FR-19
+2
+Responsiveness (≤3s to first token)
+NFR-01
+3
+Security of credentials and PII
+NFR-03, NFR-04, NFR-05
+4
+Maintainability (clear module boundaries)
+Implicit (academic project, long-term evolution)
+5
+Horizontal scalability
+NFR-10
+6
+Accessibility (WCAG 2.1 AA)
+NFR-08
+7
+Cost efficiency (token & infra spend)
+Implicit (student-grade project)
+
+2.3 Assumptions & Dependencies
+Assumptions (carried forward from SRS §2.3 with design refinements):
+Students access the system via JavaScript-enabled, evergreen browsers.
+The selected LLM provider (OpenAI) honors its published SLA of 99.9% uptime.
+Network round-trip latency between application servers and the LLM endpoint is ≤300 ms (a reasonable assumption for cloud-hosted deployments in us-east-1 or eu-west-1).
+The institutional legal team will supply boilerplate disclaimers to be embedded in the UI.
+Dependencies:
+Dependency
+Type
+Risk if Unavailable
+OpenAI Chat Completions API
+External SaaS
+Core feature failure (graceful degradation via FR-11)
+MySQL 8.0+
+Infrastructure
+Total outage
+Redis 7+
+Infrastructure
+Session & rate-limit features degraded
+SMTP service (SendGrid / AWS SES)
+External SaaS
+Registration & password reset blocked
+Node.js 20 LTS runtime
+Platform
+Total outage
+
+2.4 Constraints
+Technical: The proposal mandates Node.js + MySQL as the canonical stack; design decisions must honor this.
+Budgetary: As an academic project, the design favors managed free-tier services (Heroku, Railway, Vercel, PlanetScale free tiers) over enterprise-grade options.
+Regulatory: Although not subject to FERPA/GDPR at the academic-prototype stage, the design adopts privacy-by-design principles to ease future compliance.
+Temporal: Single-semester delivery window — design must be implementable by a small team (1–4 developers) in ~12–16 weeks.
+
+3. DESIGN CONSIDERATIONS
+3.1 Design Assumptions
+ID
+Assumption
+Justification
+DA-01
+Read/write ratio on chat data is approximately 3:1 (history browsing > new messages)
+Typical chat-app workload pattern
+DA-02
+Average conversation length: 20 messages; 95th percentile: 80 messages
+Inferred from comparable LLM apps
+DA-03
+Peak concurrent users in v1.0: ≤100 (NFR-01)
+Stated in SRS
+DA-04
+Average message length: ~150 tokens input, ~400 tokens output
+OpenAI usage analytics for educational use cases
+DA-05
+Streaming (SSE) is preferred over polling
+Reduces perceived latency by 60–80%
+
+3.2 Design Constraints
+Stateless Application Tier — to permit horizontal scaling per NFR-10, application servers must hold no session-affine state; sessions live in Redis or as signed JWTs.
+Single Source of Truth for Chat Data — MySQL is the authoritative store; Redis is treated as a volatile cache.
+No Storage of Raw OpenAI API Keys in Source — must use environment variables or a secrets manager (NFR-04).
+Schema-Forward Database Design — every migration is versioned (Flyway/Knex.js migrations) to support reliable deployment.
+3.3 Design Methodology
+The team will adopt an Agile / Scrum-lite methodology with two-week sprints, justified as follows:
+Approach
+Pros
+Cons
+Verdict
+Waterfall
+Predictable; matches academic deliverables
+Inflexible to AI-API surprises
+❌ Rejected
+Pure Scrum
+Maximum agility
+Overhead heavy for small team
+❌ Rejected
+Scrum-lite (chosen)
+Iterative; lightweight ceremonies; demo-driven
+Requires discipline
+✅ Adopted
+Kanban
+Continuous flow
+Less suited to academic milestone reporting
+❌ Rejected
+
+Each sprint delivers a vertical slice through the architecture (e.g., Sprint 2 = “registration → login → first chat message persisted”), enabling early end-to-end demonstrability.
+3.4 Risks & Mitigation Strategies
+Risk ID
+Risk
+Likelihood
+Impact
+Mitigation
+R-01
+OpenAI API outage or quota exhaustion
+Medium
+High
+Exponential backoff (FR-20); fallback message (FR-11); provider-abstraction layer to permit swap to Anthropic/Gemini
+R-02
+Prompt injection (“ignore previous instructions…”)
+High
+Medium
+Robust system prompt with delimiter pattern; output moderation via OpenAI’s omni-moderation-latest
+R-03
+Cost overrun from token consumption
+Medium
+Medium
+Per-user daily token cap; max_tokens ceiling on each call; usage dashboard
+R-04
+PII leakage to LLM provider
+Low
+High
+Regex-based PII scrubber (FR-18); contractual review of provider data-retention terms
+R-05
+Database query slowdown at scale
+Medium
+Medium
+Indexed columns (NFR-10); pagination; query budget monitoring
+R-06
+Hallucinated/incorrect academic answers
+High
+Medium
+Persistent on-screen disclaimer; system prompt encouraging “I’m not certain” admissions
+R-07
+Session hijacking
+Low
+High
+HttpOnly + Secure + SameSite=Strict cookies; CSRF tokens; short JWT TTL (15 min) with refresh tokens
+
+
+4. ARCHITECTURAL DESIGN
+4.1 Chosen Architectural Style
+After evaluation of alternatives, the system adopts a Layered (N-Tier) Architecture with a Modular Monolith backend, fronted by a Single-Page Application (SPA).
+Alternatives considered:
+Style
+Suitability
+Verdict
+Microservices
+Over-engineered for a 100-user, 3-table system; increases ops complexity
+❌ Rejected
+Serverless (FaaS)
+Cold-start latency conflicts with NFR-01 (≤3s); LLM streaming awkward over Lambda
+❌ Rejected
+Modular Monolith (chosen)
+Single deployable unit; clear module boundaries; horizontally scalable behind a load balancer; ideal for small team
+✅ Adopted
+Event-Driven / CQRS
+Unnecessary complexity — no high-throughput event firehose
+❌ Rejected
+
+The monolith is internally modularized (Auth, Chat, History, AI-Integration, Admin), with each module exposing a service interface. Should the system ever need to scale beyond a monolith, these modules can be extracted into independent services with minimal refactoring.
+4.2 High-Level Architecture Diagram
+graph TB
+    subgraph "Client Tier"
+        BR["🌐 Browser SPA<br/>(HTML + CSS + Vanilla JS)<br/>+ optional Bootstrap"]
+    end
+
+    subgraph "Edge / Delivery Tier"
+        CDN["☁️ CDN<br/>(Cloudflare)<br/>static asset cache"]
+        LB["⚖️ Load Balancer<br/>(NGINX / ALB)<br/>TLS termination"]
+    end
+
+    subgraph "Application Tier (Stateless, Horizontally Scalable)"
+        APP1["🟢 Node.js App<br/>Instance #1<br/>Express + Socket.io"]
+        APP2["🟢 Node.js App<br/>Instance #2"]
+        APPN["🟢 Node.js App<br/>Instance #N"]
+    end
+
+    subgraph "Caching & Session Tier"
+        REDIS["🔴 Redis 7<br/>Sessions, Rate-Limits,<br/>Token Cache"]
+    end
+
+    subgraph "Data Tier"
+        DB[("🗄️ MySQL 8.0<br/>Primary + Replica")]
+    end
+
+    subgraph "External Services"
+        OAI["🤖 OpenAI<br/>Chat Completions API"]
+        MAIL["✉️ SMTP<br/>(SendGrid)"]
+        LOGS["📊 Logging<br/>(Datadog / Grafana Loki)"]
+    end
+
+    BR -->|HTTPS| CDN
+    CDN -->|cache miss| LB
+    LB --> APP1
+    LB --> APP2
+    LB --> APPN
+    APP1 <--> REDIS
+    APP2 <--> REDIS
+    APPN <--> REDIS
+    APP1 --> DB
+    APP2 --> DB
+    APPN --> DB
+    APP1 -->|HTTPS + SSE| OAI
+    APP1 --> MAIL
+    APP1 -.->|async logs| LOGS
+
+    style BR fill:#61DAFB,stroke:#21A1C4
+    style OAI fill:#10A37F,stroke:#0E8C6E,color:#fff
+    style DB fill:#00758F,stroke:#005A6E,color:#fff
+    style REDIS fill:#DC382D,stroke:#A82820,color:#fff
+
+4.3 Subsystem Decomposition
+The backend monolith is partitioned into seven cohesive modules, each owning its domain logic, routes, and data access:
+graph TB
+    subgraph "Frontend SPA"
+        UI[UI Components]
+        ST[State Manager]
+        API_CLIENT[API Client]
+    end
+
+    subgraph "Backend Monolith - Express.js"
+        ROUTE["🛣️ Routing Layer<br/>(Express Router)"]
+        MW["🛡️ Middleware Layer<br/>Auth | Rate-Limit | Logging | Validation"]
+
+        subgraph "Domain Modules"
+            AUTH["🔐 Auth Module<br/>(FR-01 → FR-04)"]
+            CHAT["💬 Chat Module<br/>(FR-06 → FR-12)"]
+            HIST["📚 History Module<br/>(FR-13 → FR-17)"]
+            AI["🤖 AI Integration Module<br/>(FR-18 → FR-20)"]
+            ADMIN["👤 Admin Module<br/>(FR-05, FR-21, FR-22)"]
+            NOTIF["✉️ Notification Module<br/>(emails)"]
+        end
+
+        DAL["💾 Data Access Layer<br/>(Knex.js / Sequelize ORM)"]
+    end
+
+    UI --> ST --> API_CLIENT
+    API_CLIENT -->|REST + SSE| ROUTE
+    ROUTE --> MW
+    MW --> AUTH
+    MW --> CHAT
+    MW --> HIST
+    MW --> ADMIN
+    CHAT --> AI
+    AUTH --> NOTIF
+    AUTH --> DAL
+    CHAT --> DAL
+    HIST --> DAL
+    ADMIN --> DAL
+
+Module
+Responsibility
+Key Dependencies
+Auth
+Registration, login, JWT issuance, password reset, profile updates
+bcrypt, jsonwebtoken, Notification module
+Chat
+Message ingest, conversation orchestration, streaming response delivery
+AI Integration, History, Redis
+History
+Persisting, listing, searching, loading, deleting conversations
+DAL (MySQL full-text index)
+AI Integration
+Prompt construction, sanitization, OpenAI API client, retry/backoff, moderation
+OpenAI SDK, Redis (rate-limit counters)
+Admin
+User CRUD, dashboard metrics aggregation, flagged-content review
+DAL, RBAC middleware
+Notification
+Transactional emails (verification, password reset)
+Nodemailer + SendGrid
+Cross-cutting
+Logging, metrics, error normalization, request validation (Zod/Joi)
+Pino, Prometheus client
+
+4.4 Component Interaction & Data Flow
+The canonical “user sends a message” flow exercises nearly every subsystem and is the spine of the system:
+sequenceDiagram
+    autonumber
+    participant U as Student (Browser)
+    participant FE as SPA Frontend
+    participant LB as Load Balancer
+    participant API as Node.js API
+    participant RD as Redis
+    participant DB as MySQL
+    participant AI as OpenAI API
+
+    U->>FE: Types query, presses Send
+    FE->>FE: Optimistic UI: render user msg
+    FE->>LB: POST /api/v1/conversations/:id/messages (JWT)
+    LB->>API: Forward
+    API->>API: Validate JWT, schema (Joi)
+    API->>RD: Check per-user rate limit
+    RD-->>API: OK (under quota)
+    API->>DB: INSERT message (sender='user')
+    API->>DB: SELECT last 10 messages (context)
+    API->>API: Sanitize PII (FR-18)
+    API->>API: Construct prompt with system msg (FR-19)
+    API-->>FE: 202 Accepted + SSE stream URL
+    FE->>API: GET /api/v1/stream/:msgId (SSE)
+    API->>AI: POST /chat/completions (stream=true)
+    loop Token streaming
+        AI-->>API: data: {"delta": "token"}
+        API-->>FE: data: {"delta": "token"}
+        FE->>FE: Append token, autoscroll
+    end
+    AI-->>API: data: [DONE]
+    API->>API: Moderation check (FR-12)
+    API->>DB: INSERT message (sender='ai', full content)
+    API-->>FE: event: complete
+    FE->>FE: Persist final state, hide typing indicator
+
+4.5 Technology Stack Justification
+Layer
+Choice
+Rationale
+Alternatives Rejected
+Frontend Framework
+Vanilla JS + Web Components (with optional Bootstrap 5)
+Proposal mandates HTML/CSS/JS; no build complexity; lightweight (<100 KB)
+React/Vue (overkill for v1; adds build pipeline)
+Frontend State
+Custom EventTarget-based store
+Simple, dependency-free
+Redux (excessive)
+Backend Runtime
+Node.js 20 LTS
+Proposal-mandated; native async/streaming ideal for LLM SSE
+PHP (poor fit for streaming), Python (out of scope)
+Web Framework
+Express.js 4.x
+Battle-tested; vast middleware ecosystem
+Fastify (faster but smaller ecosystem); NestJS (heavyweight)
+Real-time Transport
+Server-Sent Events (SSE)
+Native browser support; unidirectional fits LLM token stream; works through proxies
+WebSockets (bi-directional unnecessary); long-polling (poor UX)
+Database
+MySQL 8.0
+Proposal-mandated; native full-text search supports FR-16; mature replication
+MongoDB (relational data fits SQL better); PostgreSQL (would be preferred but proposal specifies MySQL)
+ORM / Query Builder
+Knex.js
+Lightweight; explicit SQL; migration support
+Sequelize (heavier ORM); raw SQL (error-prone)
+Cache / Session
+Redis 7
+Sub-ms reads; pub/sub for future multi-instance broadcasting
+In-memory map (breaks horizontal scaling)
+AI Provider SDK
+openai official Node SDK
+First-party support; streaming primitives
+Raw HTTP (more boilerplate)
+Authentication
+JWT (RS256) + refresh tokens in Redis
+Stateless API; rotation supported
+Express-session (server-stateful)
+Email
+Nodemailer + SendGrid
+Free tier; SMTP fallback
+AWS SES (more setup)
+Logging
+Pino + JSON to stdout
+Fastest Node logger; container-friendly
+Winston (slower)
+Validation
+Joi (or Zod)
+Schema-based; consistent error messages
+Manual if checks
+Testing
+Jest + Supertest + Playwright
+Industry standard; covers unit/integration/E2E
+Mocha+Chai (less integrated)
+Containerization
+Docker + docker-compose (dev)
+Reproducible environments; cloud-portable
+Bare-metal (unportable)
+CI/CD
+GitHub Actions
+Free for public repos; native GitHub integration
+CircleCI, Jenkins (more setup)
+Hosting (recommended)
+Railway or Render for v1; AWS ECS+RDS for production
+Free/low tier; managed PG/MySQL
+Heroku (free tier removed); raw EC2 (high ops burden)
+
+4.6 Deployment Architecture
+graph TB
+    subgraph "Internet"
+        USR[Users]
+    end
+
+    subgraph "Cloudflare (Edge)"
+        DNS[DNS + WAF]
+        CDN_E[CDN<br/>Static Assets]
+    end
+
+    subgraph "Cloud Region: us-east-1"
+        subgraph "Public Subnet"
+            ALB[Application<br/>Load Balancer<br/>TLS 1.3]
+        end
+
+        subgraph "Private Subnet - App Tier"
+            ECS1[Container<br/>Task #1]
+            ECS2[Container<br/>Task #2]
+            ECS3[Container<br/>Task #3<br/>auto-scale]
+        end
+
+        subgraph "Private Subnet - Data Tier"
+            RDS[(RDS MySQL 8.0<br/>Multi-AZ)]
+            EC[(ElastiCache<br/>Redis)]
+        end
+
+        SM[Secrets Manager<br/>API Keys]
+        CW[CloudWatch<br/>Logs & Metrics]
+    end
+
+    subgraph "Third-Party"
+        OPENAI[OpenAI API]
+        SG[SendGrid]
+    end
+
+    USR --> DNS --> CDN_E
+    CDN_E --> ALB
+    ALB --> ECS1
+    ALB --> ECS2
+    ALB --> ECS3
+    ECS1 --> RDS
+    ECS1 --> EC
+    ECS1 -.->|fetch secrets| SM
+    ECS1 -->|HTTPS| OPENAI
+    ECS1 --> SG
+    ECS1 -.->|logs/metrics| CW
+
+
+5. DETAILED DESIGN
+5.1 Module-by-Module Breakdown
+5.1.1 Auth Module
+Aspect
+Detail
+Purpose
+Manage identity, credentials, and session lifecycle
+Satisfies
+FR-01, FR-02, FR-03, FR-04
+Key Classes
+AuthController, AuthService, UserRepository, PasswordHasher, TokenService, EmailVerifier
+Dependencies
+bcrypt, jsonwebtoken, crypto, NotificationModule, Redis
+External Interfaces
+/api/v1/auth/* REST endpoints
+
+Key algorithms:
+Password Hashing: bcrypt with cost factor 12 (NFR-04). At cost 12, hashing takes ~250 ms on commodity hardware — sufficient to deter brute force while not blocking the event loop excessively. Hashing is offloaded to a worker thread for concurrent requests.
+Email Verification Token: Cryptographically random 32-byte token (crypto.randomBytes(32).toString('hex')), stored hashed in DB with 24h expiry.
+Password Reset Token: Same as verification token but 30-minute expiry (FR-03) and single-use (revoked on first use).
+JWT Structure:
+// Header
+{ "alg": "RS256", "typ": "JWT", "kid": "auth-key-2025-1" }
+// Payload
+{
+  "sub": "user_42",
+  "role": "student",
+  "iat": 1730000000,
+  "exp": 1730000900,   // 15-minute access token
+  "jti": "550e8400-e29b-41d4-a716-446655440000"
+}
+
+Class signature example:
+class AuthService {
+  async register(dto: RegisterDTO): Promise<RegistrationResult>;
+  async verifyEmail(token: string): Promise<void>;
+  async login(email: string, password: string): Promise<TokenPair>;
+  async refreshToken(refreshToken: string): Promise<TokenPair>;
+  async requestPasswordReset(email: string): Promise<void>;
+  async resetPassword(token: string, newPassword: string): Promise<void>;
+  async updateProfile(userId: string, dto: ProfileUpdateDTO): Promise<User>;
+}
+
+5.1.2 Chat Module
+Aspect
+Detail
+Purpose
+Orchestrate the request/response cycle of a single message turn
+Satisfies
+FR-06, FR-07, FR-08, FR-09, FR-10, FR-11, FR-12
+Key Classes
+ChatController, ChatService, ConversationContextBuilder, StreamingResponder, ModerationGuard
+Dependencies
+AI Integration Module, History Module, Redis (rate-limit), eventsource-stream
+
+Conversation Context Algorithm (FR-08):
+function buildContext(conversationId, currentMessage):
+    recent = fetchLastNMessages(conversationId, N=10)
+    tokenBudget = MODEL_CONTEXT_LIMIT - SYSTEM_PROMPT_TOKENS
+                 - estimateTokens(currentMessage) - RESPONSE_RESERVE (1000)
+    contextMessages = []
+    for msg in reverse(recent):
+        msgTokens = estimateTokens(msg.content)
+        if tokenBudget - msgTokens < 0: break
+        contextMessages.prepend(msg)
+        tokenBudget -= msgTokens
+    return [SYSTEM_PROMPT, ...contextMessages, {role:'user', content: currentMessage}]
+
+This implements an adaptive sliding window that prefers more recent context while never exceeding the model’s context limit — a safer approach than a hard-coded message count.
+5.1.3 History Module
+Aspect
+Detail
+Purpose
+Persist, browse, search, and delete conversations
+Satisfies
+FR-13, FR-14, FR-15, FR-16, FR-17
+Key Classes
+HistoryController, ConversationRepository, MessageRepository, SearchService
+Dependencies
+MySQL (full-text index on messages.content)
+
+Search algorithm (FR-16): Uses MySQL MATCH ... AGAINST natural-language mode on the full-text index. Snippet highlighting is performed application-side using a regex over matched tokens.
+SELECT c.id, c.title, c.updated_at,
+       MATCH(m.content) AGAINST(? IN NATURAL LANGUAGE MODE) AS relevance
+FROM conversations c
+JOIN messages m ON m.conversation_id = c.id
+WHERE c.user_id = ?
+  AND MATCH(m.content) AGAINST(? IN NATURAL LANGUAGE MODE)
+GROUP BY c.id
+ORDER BY relevance DESC, c.updated_at DESC
+LIMIT 20;
+
+5.1.4 AI Integration Module
+Aspect
+Detail
+Purpose
+Encapsulate all interaction with the external LLM provider
+Satisfies
+FR-07, FR-18, FR-19, FR-20
+Key Classes
+LLMProvider (interface), OpenAIProvider, PromptSanitizer, RetryPolicy, ModerationService
+Design Pattern
+Strategy (provider) + Decorator (sanitization, retry)
+
+PII Sanitization Patterns (FR-18):
+const PII_PATTERNS = [
+  { name: 'email',       regex: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, replacement: '[EMAIL]' },
+  { name: 'phone_intl',  regex: /\+?\d{1,3}[\s-]?\(?\d{1,4}\)?[\s-]?\d{3,4}[\s-]?\d{3,4}/g, replacement: '[PHONE]' },
+  { name: 'ssn_us',      regex: /\b\d{3}-\d{2}-\d{4}\b/g, replacement: '[SSN]' },
+  { name: 'credit_card', regex: /\b(?:\d[ -]*?){13,19}\b/g, replacement: '[CARD]' }, // followed by Luhn check
+  { name: 'ip',          regex: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g, replacement: '[IP]' },
+];
+
+Retry Policy (FR-20): Exponential backoff with jitter — delay = min(2^attempt × 500ms + random(0..500ms), 8000ms), max 3 retries. Only retries on HTTP 429, 500, 502, 503, 504.
+5.1.5 Admin Module
+Aspect
+Detail
+Purpose
+Administrative oversight
+Satisfies
+FR-05, FR-21, FR-22
+Key Classes
+AdminController, UserManagementService, DashboardMetricsService, FlaggedContentService
+Authorization
+Requires role: 'admin' claim in JWT; enforced by requireRole('admin') middleware
+
+Dashboard metrics (FR-21) are computed via pre-aggregated counters in Redis (incremented on each event) with a 5-minute refresh from MySQL as the authoritative fallback — keeping the dashboard <100 ms responsive even with millions of historical messages.
+5.1.6 Notification Module
+Aspect
+Detail
+Purpose
+Send transactional emails
+Satisfies
+Supports FR-01, FR-03
+Key Classes
+EmailService, TemplateRenderer
+Templates
+MJML-compiled HTML → responsive emails
+Delivery
+Asynchronous via in-memory queue → SendGrid SMTP
+
+5.1.7 Cross-Cutting Concerns
+Logger: Singleton Pino instance; child loggers per request with requestId correlation.
+Validator: Joi schemas declared adjacent to controllers.
+Error Normalizer: Central Express error-handling middleware translating exceptions to { error: { code, message, requestId } }.
+5.2 Class Diagram
+classDiagram
+    class User {
+        +UUID id
+        +string email
+        +string passwordHash
+        +string displayName
+        +Role role
+        +bool isActive
+        +bool isEmailVerified
+        +Date createdAt
+        +Date updatedAt
+        +verifyPassword(plain) bool
+        +deactivate() void
+    }
+
+    class Conversation {
+        +UUID id
+        +UUID userId
+        +string title
+        +int messageCount
+        +Date createdAt
+        +Date updatedAt
+        +addMessage(msg) void
+        +deriveTitle() string
+    }
+
+    class Message {
+        +UUID id
+        +UUID conversationId
+        +SenderType senderType
+        +text content
+        +int tokenCount
+        +bool isFlagged
+        +Date createdAt
+        +flag(reason) void
+    }
+
+    class FlaggedContent {
+        +UUID id
+        +UUID messageId
+        +string reason
+        +ModerationStatus status
+        +UUID reviewedBy
+        +Date reviewedAt
+    }
+
+    class AuditLog {
+        +UUID id
+        +UUID actorId
+        +string action
+        +json metadata
+        +Date createdAt
+    }
+
+    class RefreshToken {
+        +string jti
+        +UUID userId
+        +Date expiresAt
+        +bool revoked
+    }
+
+    User "1" --> "0..*" Conversation : owns
+    Conversation "1" --> "1..*" Message : contains
+    Message "1" --> "0..1" FlaggedContent : may have
+    User "1" --> "0..*" RefreshToken : holds
+    User "1" --> "0..*" AuditLog : generates
+
+    class Role {
+        <<enumeration>>
+        STUDENT
+        ADMIN
+    }
+
+    class SenderType {
+        <<enumeration>>
+        USER
+        AI
+        SYSTEM
+    }
+
+    class ModerationStatus {
+        <<enumeration>>
+        PENDING
+        APPROVED
+        DELETED
+    }
+
+5.3 Sequence Diagrams for Key Use Cases
+5.3.1 Registration Flow (FR-01)
+sequenceDiagram
+    participant V as Visitor
+    participant FE as Frontend
+    participant API as Backend
+    participant DB as MySQL
+    participant MAIL as Email Service
+    participant U as Verification URL
+
+    V->>FE: Fill registration form
+    FE->>FE: Client-side validation
+    FE->>API: POST /auth/register
+    API->>API: Joi validate (email, pwd complexity)
+    API->>DB: SELECT user WHERE email=?
+    DB-->>API: not found
+    API->>API: bcrypt hash (cost 12)
+    API->>API: generate verification token
+    API->>DB: INSERT user (isActive=false)
+    API->>DB: INSERT verification_token
+    API->>MAIL: send verification email
+    API-->>FE: 201 {message: "Check your email"}
+    FE-->>V: Show confirmation screen
+    V->>U: Clicks link with token
+    U->>API: GET /auth/verify?token=...
+    API->>DB: lookup + validate token
+    API->>DB: UPDATE user SET isActive=true
+    API->>DB: DELETE token
+    API-->>V: Redirect to /login?verified=1
+
+5.3.2 Chat with Streaming (FR-06, FR-07, FR-10)
+(See sequence in §4.4 — the canonical message flow.)
+5.3.3 Admin Deactivates User (FR-05)
+sequenceDiagram
+    participant A as Admin
+    participant FE as Admin UI
+    participant API as Backend
+    participant DB as MySQL
+    participant RD as Redis
+
+    A->>FE: Search "student@x.com", click Deactivate
+    FE->>API: PATCH /admin/users/:id {isActive:false}
+    API->>API: RBAC: verify role=admin
+    API->>DB: UPDATE users SET is_active=false
+    API->>RD: DEL refresh_tokens for user
+    API->>DB: INSERT audit_log
+    API-->>FE: 200 OK
+    FE-->>A: Toast "User deactivated"
+
+5.4 State Diagrams
+5.4.1 Conversation State Machine
+stateDiagram-v2
+    [*] --> Active : New conversation created
+    Active --> WaitingForAI : User sends message
+    WaitingForAI --> Streaming : First token received
+    Streaming --> Active : Stream completes
+    WaitingForAI --> Error : Timeout (15s) / API error
+    Streaming --> Error : Stream interrupted
+    Error --> Active : User retries
+    Active --> Archived : User starts new conversation
+    Active --> Deleted : User confirms deletion
+    Archived --> Active : User reopens from history
+    Deleted --> [*]
+
+5.4.2 User Account State Machine
+stateDiagram-v2
+    [*] --> Pending : Register
+    Pending --> Active : Email verified
+    Pending --> Expired : Token > 24h
+    Expired --> [*] : Cleanup job
+    Active --> Deactivated : Admin action
+    Deactivated --> Active : Admin reactivation
+    Active --> Deleted : Admin permanent delete
+    Deleted --> [*]
+
+5.5 Activity Diagrams
+5.5.1 Send Message Activity
+flowchart TD
+    Start([User submits message]) --> Validate{Valid?<br/>≤2000 chars,<br/>not empty}
+    Validate -->|No| ShowError[Show inline error]
+    Validate -->|Yes| RateLimit{Under rate<br/>limit?}
+    RateLimit -->|No| Limit[Show: too many requests]
+    RateLimit -->|Yes| SaveUser[Persist user message]
+    SaveUser --> BuildCtx[Build context window]
+    BuildCtx --> Sanitize[Sanitize PII]
+    Sanitize --> CallAI[Call OpenAI<br/>streaming]
+    CallAI --> Stream{Tokens<br/>arriving?}
+    Stream -->|Yes| Push[Push to SSE]
+    Push --> Stream
+    Stream -->|Done| Moderate{Content<br/>safe?}
+    Moderate -->|No| Replace[Replace with<br/>generic message<br/>FR-12]
+    Moderate -->|Yes| SaveAI[Persist AI message]
+    Replace --> SaveAI
+    SaveAI --> Done([Render complete])
+    CallAI -.->|Timeout/Error| Retry{Retry<br/>< 3?}
+    Retry -->|Yes| Backoff[Exp. backoff]
+    Backoff --> CallAI
+    Retry -->|No| Fail[Show: assistant<br/>unavailable<br/>FR-11]
+
+
+6. DATA DESIGN
+6.1 Conceptual Data Model
+The domain consists of five core entities:
+erDiagram
+    USERS ||--o{ CONVERSATIONS : "owns"
+    CONVERSATIONS ||--|{ MESSAGES : "contains"
+    MESSAGES ||--o| FLAGGED_CONTENT : "may flag"
+    USERS ||--o{ REFRESH_TOKENS : "issued"
+    USERS ||--o{ AUDIT_LOGS : "performs"
+    USERS ||--o{ EMAIL_TOKENS : "requests"
+
+    USERS {
+        char36 id PK
+        varchar email UK
+        varchar password_hash
+        varchar display_name
+        enum role
+        boolean is_active
+        boolean is_email_verified
+        timestamp created_at
+        timestamp updated_at
+    }
+    CONVERSATIONS {
+        char36 id PK
+        char36 user_id FK
+        varchar title
+        int message_count
+        timestamp created_at
+        timestamp updated_at
+    }
+    MESSAGES {
+        char36 id PK
+        char36 conversation_id FK
+        enum sender_type
+        text content
+        int token_count
+        boolean is_flagged
+        timestamp created_at
+    }
+    FLAGGED_CONTENT {
+        char36 id PK
+        char36 message_id FK
+        varchar reason
+        enum status
+        char36 reviewed_by FK
+        timestamp reviewed_at
+    }
+    REFRESH_TOKENS {
+        char36 jti PK
+        char36 user_id FK
+        timestamp expires_at
+        boolean revoked
+    }
+    EMAIL_TOKENS {
+        char36 id PK
+        char36 user_id FK
+        enum purpose
+        char64 token_hash
+        timestamp expires_at
+        boolean used
+    }
+    AUDIT_LOGS {
+        char36 id PK
+        char36 actor_id FK
+        varchar action
+        json metadata
+        timestamp created_at
+    }
+
+6.2 Logical Schema (MySQL 8.0 DDL)
+-- =============================================================
+-- AI Study Assistant Chatbot — Database Schema v1.0
+-- Engine: InnoDB | Charset: utf8mb4 | Collation: utf8mb4_0900_ai_ci
+-- =============================================================
+
+CREATE TABLE users (
+    id              CHAR(36)        NOT NULL PRIMARY KEY,
+    email           VARCHAR(255)    NOT NULL,
+    password_hash   VARCHAR(72)     NOT NULL,           -- bcrypt fixed length
+    display_name    VARCHAR(100)    NOT NULL,
+    role            ENUM('student','admin') NOT NULL DEFAULT 'student',
+    is_active       BOOLEAN         NOT NULL DEFAULT FALSE,
+    is_email_verified BOOLEAN       NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                    ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_users_email (email),
+    KEY idx_users_active (is_active, role)
+) ENGINE=InnoDB;
+
+CREATE TABLE conversations (
+    id              CHAR(36)        NOT NULL PRIMARY KEY,
+    user_id         CHAR(36)        NOT NULL,
+    title           VARCHAR(200)    NOT NULL DEFAULT 'New Conversation',
+    message_count   INT UNSIGNED    NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                    ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_conv_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    KEY idx_conv_user_updated (user_id, updated_at DESC)
+) ENGINE=InnoDB;
+
+CREATE TABLE messages (
+    id              CHAR(36)        NOT NULL PRIMARY KEY,
+    conversation_id CHAR(36)        NOT NULL,
+    sender_type     ENUM('user','ai','system') NOT NULL,
+    content         TEXT            NOT NULL,
+    token_count     SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    is_flagged      BOOLEAN         NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMP(3)    NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    CONSTRAINT fk_msg_conv FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    KEY idx_msg_conv_created (conversation_id, created_at),
+    FULLTEXT KEY ft_msg_content (content)                 -- supports FR-16
+) ENGINE=InnoDB;
+
+CREATE TABLE flagged_content (
+    id              CHAR(36)        NOT NULL PRIMARY KEY,
+    message_id      CHAR(36)        NOT NULL,
+    reason          VARCHAR(255)    NOT NULL,
+    status          ENUM('pending','approved','deleted') NOT NULL DEFAULT 'pending',
+    reviewed_by     CHAR(36)        NULL,
+    reviewed_at     TIMESTAMP       NULL,
+    created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_flag_msg FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    CONSTRAINT fk_flag_user FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+    KEY idx_flag_status (status, created_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE refresh_tokens (
+    jti             CHAR(36)        NOT NULL PRIMARY KEY,
+    user_id         CHAR(36)        NOT NULL,
+    expires_at      TIMESTAMP       NOT NULL,
+    revoked         BOOLEAN         NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_rt_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    KEY idx_rt_user (user_id, revoked)
+) ENGINE=InnoDB;
+
+CREATE TABLE email_tokens (
+    id              CHAR(36)        NOT NULL PRIMARY KEY,
+    user_id         CHAR(36)        NOT NULL,
+    purpose         ENUM('verify_email','reset_password') NOT NULL,
+    token_hash      CHAR(64)        NOT NULL,            -- SHA-256 hex
+    expires_at      TIMESTAMP       NOT NULL,
+    used            BOOLEAN         NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_et_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_et_hash (token_hash),
+    KEY idx_et_expiry (expires_at, used)
+) ENGINE=InnoDB;
+
+CREATE TABLE audit_logs (
+    id              CHAR(36)        NOT NULL PRIMARY KEY,
+    actor_id        CHAR(36)        NULL,
+    action          VARCHAR(100)    NOT NULL,
+    metadata        JSON            NULL,
+    created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_audit_user FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL,
+    KEY idx_audit_action_time (action, created_at)
+) ENGINE=InnoDB;
+
+6.3 Physical Storage Considerations
+Storage Engine: InnoDB — required for transactions, row-level locking, and foreign-key enforcement.
+Character Set: utf8mb4 to support emoji and the full Unicode plane in message content.
+Partitioning Strategy: For v1.0, no partitioning. When messages exceeds 10M rows (NFR-10), introduce monthly range partitioning on created_at:
+ALTER TABLE messages
+PARTITION BY RANGE (TO_DAYS(created_at)) (
+  PARTITION p2025_01 VALUES LESS THAN (TO_DAYS('2025-02-01')),
+  PARTITION p2025_02 VALUES LESS THAN (TO_DAYS('2025-03-01')),
+  -- ...
+  PARTITION pmax VALUES LESS THAN MAXVALUE
+);
+
+Read Replica: A read-only replica handles history browsing and admin dashboards; writes go to the primary.
+6.4 Data Dictionary (Excerpt)
+Table
+Column
+Type
+Constraints
+Description
+users
+email
+VARCHAR(255)
+UNIQUE, NOT NULL
+RFC 5322-validated lowercase email
+users
+password_hash
+VARCHAR(72)
+NOT NULL
+bcrypt hash (60 chars; 72 for safety)
+users
+role
+ENUM
+DEFAULT ‘student’
+Authorization role
+conversations
+title
+VARCHAR(200)
+DEFAULT ‘New Conversation’
+Auto-derived from first user message (truncated)
+messages
+sender_type
+ENUM
+NOT NULL
+Distinguishes user / AI / system messages
+messages
+token_count
+SMALLINT
+DEFAULT 0
+For per-user usage analytics & cost tracking
+messages
+content
+TEXT
+NOT NULL, FULLTEXT
+Plain text up to 65 KB; covered by FT index
+flagged_content
+reason
+VARCHAR(255)
+NOT NULL
+Moderation category from OpenAI moderation API
+email_tokens
+token_hash
+CHAR(64)
+UNIQUE
+Only hash stored; raw token never persisted
+
+6.5 Data Migration & Seeding Strategy
+Migrations: Managed by Knex.js migrations (/migrations/*.js), versioned in Git. Each migration is reversible (up/down).
+Seeds: Two seed sets — dev (10 students, 1 admin, 50 conversations) and prod (empty, plus one root admin from env vars).
+Migration in CI/CD: knex migrate:latest runs as a pre-deploy step; deployments abort on migration failure.
+6.6 Backup & Recovery Approach
+Aspect
+Specification
+Driving Requirement
+Backup Frequency
+Full snapshot daily at 03:00 UTC; binary-log–based PITR (Point-In-Time Recovery) continuously
+NFR-07 (≤15 min data loss = RPO 15 min)
+Retention
+7 daily, 4 weekly, 6 monthly snapshots
+Operational best practice
+Storage
+Encrypted S3 bucket (SSE-AES256), cross-region replication
+Disaster recovery
+Recovery Drill
+Quarterly restore-to-staging exercise
+Validate RTO 1 hour (NFR-07)
+Verification
+Automated pt-table-checksum post-restore
+Detect silent corruption
+
+
+7. INTERFACE DESIGN
+7.1 User Interface Design
+7.1.1 Information Architecture
+┌──────────────────────────────────────────────────────────────┐
+│                         AI Study Assistant                    │
+├──────────────────────────────────────────────────────────────┤
+│ Public          │ Authenticated (Student)  │ Admin           │
+├─────────────────┼──────────────────────────┼─────────────────┤
+│ • Landing       │ • Chat (default)         │ • Dashboard     │
+│ • Register      │ • History (sidebar)      │ • Users         │
+│ • Login         │ • Profile                │ • Flagged       │
+│ • Verify Email  │ • Search                 │ • Audit Logs    │
+│ • Reset Pwd     │ • Logout                 │                 │
+└─────────────────┴──────────────────────────┴─────────────────┘
+
+7.1.2 Primary Chat Screen (Wireframe Description)
+┌──────────────────────────────────────────────────────────────────┐
+│ [≡]  AI Study Assistant                  [🔍 Search]  [👤 Profile]│  ← Header (sticky, 56px)
+├────────────┬─────────────────────────────────────────────────────┤
+│            │                                                     │
+│  + New     │   ┌──────────────────────────────────────────┐     │
+│  ─────     │   │ User:  What is the difference between    │     │
+│  History   │   │ TCP and UDP?                       12:04 │     │
+│            │   └──────────────────────────────────────────┘     │
+│  Today     │              ┌────────────────────────────────────┐│
+│  • TCP vs..│              │ AI: TCP is connection-oriented...  ││
+│  • Calculus│              │ ...                          12:04 ││
+│            │              └────────────────────────────────────┘│
+│  Yesterday │              ┌─[ typing indicator ●●● ]────────┐  │
+│  • Newton..│                                                    │
+│            │   ┌──────────────────────────────────────────┐   │
+│            │   │  Type your study question…            [↵] │   │  ← Input (sticky bottom)
+│            │   └──────────────────────────────────────────┘   │
+│            │   ⚠ AI may produce inaccurate information.        │  ← Disclaimer
+└────────────┴─────────────────────────────────────────────────────┘
+
+7.1.3 Accessibility Provisions (NFR-08)
+WCAG 2.1 AA Requirement
+Implementation
+Color contrast ≥ 4.5:1
+Tailwind/Bootstrap default tokens audited via axe-core
+Keyboard navigation
+All interactive elements reachable via Tab; visible focus rings
+Screen reader support
+aria-live="polite" on chat message container; messages announced as they stream
+Semantic HTML
+<main>, <nav>, <article>, <button> (never clickable <div>)
+Reduced motion
+@media (prefers-reduced-motion) disables typing-indicator animation
+Text scaling
+Layout reflows up to 200% zoom without horizontal scroll
+
+7.1.4 Responsive Breakpoints
+Breakpoint
+Behavior
+< 768px (mobile)
+Sidebar collapses to hamburger drawer; input grows to full width
+768–1199px (tablet)
+Sidebar fixed at 240px
+≥ 1200px (desktop)
+Sidebar 280px; chat area centered with max-width 768px for readability
+
+7.2 API Design
+The system exposes a RESTful JSON API versioned under /api/v1/. Authentication is via Authorization: Bearer <jwt>. Errors follow RFC 7807 Problem Details.
+7.2.1 Endpoint Catalog
+Method
+Path
+Auth
+Purpose
+Maps to FR
+POST
+/auth/register
+—
+Create account
+FR-01
+GET
+/auth/verify
+—
+Verify email
+FR-01
+POST
+/auth/login
+—
+Issue token pair
+FR-02
+POST
+/auth/refresh
+refresh tok.
+Renew access token
+FR-02
+POST
+/auth/logout
+✅
+Revoke refresh token
+FR-02
+POST
+/auth/password-reset
+—
+Initiate reset
+FR-03
+POST
+/auth/password-reset/confirm
+—
+Complete reset
+FR-03
+GET
+/me
+✅
+Profile
+FR-04
+PATCH
+/me
+✅
+Update profile
+FR-04
+POST
+/conversations
+✅
+Start new conversation
+FR-09
+GET
+/conversations
+✅
+List w/ pagination
+FR-14
+GET
+/conversations/:id
+✅
+Load transcript
+FR-15
+DELETE
+/conversations/:id
+✅
+Delete
+FR-17
+GET
+/conversations/search?q=
+✅
+Search history
+FR-16
+POST
+/conversations/:id/messages
+✅
+Send message
+FR-06, FR-07
+GET
+/stream/:messageId
+✅ (token in qs)
+SSE token stream
+FR-07, FR-10
+GET
+/admin/users
+admin
+List users
+FR-05
+PATCH
+/admin/users/:id
+admin
+Activate/deactivate
+FR-05
+DELETE
+/admin/users/:id
+admin
+Permanent delete
+FR-05
+GET
+/admin/metrics
+admin
+Dashboard counters
+FR-21
+GET
+/admin/flagged
+admin
+Review flagged
+FR-22
+PATCH
+/admin/flagged/:id
+admin
+Update flagged status
+FR-22
+
+7.2.2 Sample Payloads
+Register:
+POST /api/v1/auth/register HTTP/1.1
+Content-Type: application/json
+
+{
+  "email": "alice@university.edu",
+  "displayName": "Alice Chen",
+  "password": "SecurePass123"
+}
+
+Send Message — Response:
+POST /api/v1/conversations/abc-123/messages HTTP/1.1
+Authorization: Bearer eyJhbGc...
+Content-Type: application/json
+
+{ "content": "Explain the second law of thermodynamics" }
+
+--- Response ---
+HTTP/1.1 202 Accepted
+Content-Type: application/json
+{
+  "userMessageId": "msg_111",
+  "assistantMessageId": "msg_112",
+  "streamUrl": "/api/v1/stream/msg_112?ticket=xyz"
+}
+
+SSE Stream:
+event: token
+data: {"delta": "The "}
+
+event: token
+data: {"delta": "second "}
+
+event: token
+data: {"delta": "law..."}
+
+event: complete
+data: {"messageId": "msg_112", "totalTokens": 87}
+
+Standard Error:
+{
+  "type": "https://api.aichatbot/errors/rate-limited",
+  "title": "Too Many Requests",
+  "status": 429,
+  "detail": "You have exceeded 30 messages per minute.",
+  "requestId": "req_018ab9c2"
+}
+
+7.3 External System Interfaces
+System
+Protocol
+Endpoint
+Auth
+Purpose
+OpenAI Chat Completions
+HTTPS / SSE
+https://api.openai.com/v1/chat/completions
+Bearer (API key from secrets)
+Generate AI response
+OpenAI Moderation
+HTTPS
+https://api.openai.com/v1/moderations
+Bearer
+Post-generation content scan (FR-12)
+SendGrid
+SMTP / HTTPS
+smtp.sendgrid.net:587 or REST
+API key
+Email delivery
+Cloudflare
+HTTPS
+DNS + WAF
+Account token
+Edge security, caching
+
+7.4 Hardware Interfaces
+The system targets standard cloud infrastructure and standard browser hardware (keyboard, pointer, touch). No bespoke hardware integration is required (e.g., no microphone access in v1.0 — voice input is out of scope).
+
+8. SECURITY DESIGN
+8.1 Authentication & Authorization
+Authentication: JWT with refresh-token rotation.
+Token
+Algorithm
+TTL
+Storage (Client)
+Storage (Server)
+Access Token
+RS256 (asymmetric)
+15 min
+In-memory only
+None (stateless)
+Refresh Token
+RS256
+7 days
+HttpOnly + Secure + SameSite=Strict cookie
+Hashed jti in refresh_tokens table
+
+Refresh Rotation: Each /auth/refresh issues a new refresh token and revokes the prior one — detects token theft (if old token reused → entire chain revoked, user forced to re-login).
+Authorization: RBAC. Two roles (student, admin) enforced by Express middleware:
+const requireRole = (role) => (req, res, next) =>
+  req.user?.role === role ? next() : res.status(403).json({ error: 'Forbidden' });
+
+router.get('/admin/users', authenticate, requireRole('admin'), AdminController.listUsers);
+
+8.2 Data Encryption
+Data
+At Rest
+In Transit
+User credentials
+bcrypt hash (cost 12) — not “encrypted” but irreversible
+TLS 1.3
+Database
+RDS-level AES-256 encryption
+TLS to MySQL with require_secure_transport=ON
+Backups
+S3 SSE-AES256 + KMS-managed key
+HTTPS
+Logs
+Encrypted log group (CloudWatch)
+TLS
+Secrets
+AWS Secrets Manager (KMS-encrypted)
+TLS
+All HTTP traffic
+—
+TLS 1.2+ (NFR-03) via ALB + HSTS header
+
+8.3 Input Validation & Sanitization
+Every endpoint declares a Joi schema, validated by validate(schema) middleware. The principle: never trust input.
+const sendMessageSchema = Joi.object({
+  content: Joi.string()
+            .trim()
+            .min(1)
+            .max(2000)            // enforces FR-06
+            .required()
+});
+
+Output rendered in the chat UI uses textContent assignment (never innerHTML) to prevent XSS, with explicit Markdown rendering through DOMPurify-sanitized marked.js.
+8.4 OWASP Top 10 (2021) Mitigation
+Risk
+Mitigation
+A01 Broken Access Control
+RBAC middleware; ownership checks on every conversation/message access
+A02 Cryptographic Failures
+bcrypt cost 12; TLS 1.3; secrets in vault; no hash truncation
+A03 Injection
+Parameterized queries via Knex; Joi validation; DOMPurify for output
+A04 Insecure Design
+Threat modeling (STRIDE) performed; PII scrubbing; rate limiting
+A05 Security Misconfiguration
+helmet middleware sets CSP, X-Frame-Options, HSTS; secure defaults
+A06 Vulnerable Components
+Renovate Bot + npm audit in CI; weekly Snyk scan
+A07 Authn Failures
+Account lockout after 5 failed logins; CAPTCHA after 3; password complexity
+A08 Software/Data Integrity
+NPM package-lock; signed Docker images; SLSA Level 2 for CI
+A09 Logging & Monitoring
+Structured logs; alerts on 401-spike, 5xx-spike; audit_logs table
+A10 SSRF
+OpenAI endpoint allow-listed; egress restricted via VPC SG
+
+8.5 Audit Logging
+The audit_logs table captures every privileged action:
+Action
+Actor
+Metadata
+USER_REGISTERED
+self
+{ email }
+USER_LOGIN_SUCCESS
+self
+{ ip, ua }
+USER_LOGIN_FAILURE
+—
+{ email, ip, reason }
+ADMIN_USER_DEACTIVATED
+admin
+{ targetUserId, reason }
+CONTENT_FLAGGED
+system
+{ messageId, categories }
+PASSWORD_RESET_REQUESTED
+self
+{ ip }
+
+Logs are immutable from the application (no UPDATE/DELETE exposed) and shipped to an append-only log store (CloudWatch / Loki) for tamper resistance.
+8.6 Compliance
+While the v1.0 prototype is not under GDPR/FERPA contractual obligation, the design adopts the following privacy-by-design principles, anticipating future compliance:
+Right to Erasure: DELETE /me cascades to remove all user data within 30 days.
+Data Minimization: PII scrubber (FR-18) prevents accidental PII transmission to the third-party LLM.
+Purpose Limitation: Email addresses used only for transactional notifications; no marketing.
+Disclosure: A privacy policy page enumerates all data flows (especially OpenAI as a sub-processor).
+
+9. PERFORMANCE & SCALABILITY DESIGN
+9.1 Expected Load & Capacity Planning
+Metric
+v1.0 Target
+Growth (v2.0)
+Concurrent users
+100 (NFR-01)
+1,000
+Messages/sec (peak)
+~5
+~50
+Messages/day
+~25,000
+~250,000
+Storage growth
+~15 MB/day
+~150 MB/day
+OpenAI token spend (est.)
+~5M tokens/month
+~50M tokens/month
+
+9.2 Caching Strategy
+Cache Layer
+Tool
+TTL
+Invalidation
+Browser HTTP cache
+Cache-Control headers
+Static: 1 year (hashed assets); HTML: 5 min
+Versioned filenames
+CDN (Cloudflare)
+Edge cache
+Static: 1 year; API: bypass
+On deploy via purge API
+Redis (Application)
+—
+—
+—
+↳ Session/JWT JTI blacklist
+Redis
+until token expiry
+On logout/revoke
+↳ Rate-limit counters
+Redis
+60 s sliding window
+Auto-expire
+↳ Dashboard metric counters
+Redis
+refreshed every 5 min from DB
+Time-based
+↳ User profile (read)
+Redis
+5 min
+On profile update
+MySQL query cache
+InnoDB buffer pool
+—
+LRU
+
+9.3 Database Optimization
+Index strategy (already in §6.2 DDL):
+users(email) UNIQUE — login lookup
+conversations(user_id, updated_at DESC) — history list, FR-14
+messages(conversation_id, created_at) — transcript load, FR-15
+FULLTEXT messages(content) — search, FR-16
+email_tokens(token_hash) UNIQUE — verification lookup
+Query Budget: Every endpoint must complete its DB work in ≤100 ms p95 (leaving headroom under the NFR-10 500 ms ceiling). Slow queries (>200 ms) are auto-logged and triaged.
+Connection Pooling: mysql2 pool with min=2, max=20 connections per Node instance. Pool exhaustion triggers a structured warning before reaching saturation.
+9.4 Horizontal vs Vertical Scaling
+Stateless app tier → horizontal: behind ALB, scale by container count (target: CPU 60% / memory 70%).
+Database → vertical first, then read replicas: upgrade RDS instance class until ~70% CPU sustained, then add read replicas for history/admin read load.
+Redis → vertical (single-instance with persistence) until v2.0, when Redis Cluster considered.
+9.5 Load Balancing & CDN
+L7 Load Balancer (AWS ALB or NGINX) with least-outstanding-requests algorithm — superior to round-robin for streaming workloads where some connections hold open longer.
+SSE Connection Limits: ALB idle timeout raised to 120 s (max OpenAI streaming response). Browser limit of 6 SSE connections per origin documented; system uses a single multiplexed SSE per active chat.
+CDN: Cloudflare for global edge caching of /assets/*, with brotli compression enabled.
+
+10. ERROR HANDLING & LOGGING
+10.1 Exception Handling Strategy
+A three-tier error taxonomy:
+// Tier 1: Domain errors (expected; map to 4xx)
+class ValidationError extends DomainError { status = 400; }
+class AuthenticationError extends DomainError { status = 401; }
+class AuthorizationError extends DomainError { status = 403; }
+class NotFoundError extends DomainError { status = 404; }
+class RateLimitError extends DomainError { status = 429; }
+
+// Tier 2: Integration errors (external; may retry; map to 502/503)
+class UpstreamUnavailableError extends IntegrationError { status = 503; }
+class UpstreamTimeoutError extends IntegrationError { status = 504; }
+
+// Tier 3: Programmer errors (bugs; map to 500 + alert)
+class UnexpectedError extends Error { status = 500; }
+
+A central Express error-handling middleware:
+Logs the error with full context.
+Sanitizes the response (no stack traces in production).
+Returns the standard RFC-7807 envelope.
+Unhandled rejection / uncaught exception: Logged, then the process exits and is restarted by the container orchestrator — preventing zombie state.
+10.2 Logging Framework & Levels
+Library: Pino (fastest JSON logger; ~5× Winston).
+Format: Structured JSON, one event per line.
+Correlation: Every request gets requestId (UUID) injected via middleware; propagated to all logs and to downstream OpenAI calls as X-Request-ID.
+PII Hygiene (NFR-05): A custom redactor strips password, token, authorization, content (message body) fields before serialization.
+Level
+Use
+fatal
+Process-killing error
+error
+Request failed unexpectedly (Tier 3)
+warn
+Recoverable issue (retry succeeded, rate limit, moderation hit)
+info
+Request boundary, lifecycle events
+debug
+Per-request diagnostics (disabled in prod)
+trace
+Tight loop diagnostics (dev only)
+
+Example log line:
+{
+  "level":"info",
+  "time":"2025-11-04T12:04:33.121Z",
+  "requestId":"req_018ab9",
+  "userId":"u_42",
+  "msg":"chat.message.streamed",
+  "tokensIn":142,
+  "tokensOut":389,
+  "latencyMs":2871,
+  "model":"gpt-4o-mini"
+}
+
+10.3 Monitoring & Alerting
+Signal
+Tool
+Threshold
+Action
+HTTP 5xx rate
+Prometheus / CloudWatch
+>2% over 5 min
+Page on-call
+p95 latency /messages
+Prometheus
+>3 s for 10 min (NFR-01)
+Warning
+OpenAI error rate
+Prometheus
+>10% over 5 min
+Switch to degraded banner
+MySQL connection pool saturation
+Prometheus
+>85%
+Warning + auto-scale signal
+Disk space
+CloudWatch
+<15% free
+Page
+Login failure rate
+Loki query
+>50/min from single IP
+Auto-IP block 1h
+
+A Grafana dashboard (or CloudWatch dashboard) consolidates: request rate, error rate, p50/p95/p99 latency, OpenAI token spend, active users.
+
+11. TESTING STRATEGY
+11.1 Test Pyramid
+           ┌────────────┐
+            │   E2E (5%)  │     Playwright
+            │  Happy paths│     ~10 scenarios
+            └────────────┘
+         ┌──────────────────┐
+         │ Integration (25%)│   Supertest + ephemeral
+         │ API + DB + Redis │   MySQL via Testcontainers
+         └──────────────────┘
+    ┌────────────────────────────┐
+    │       Unit (70%)            │  Jest, pure functions,
+    │  Services, helpers, utils   │  mocked dependencies
+    └────────────────────────────┘
+
+11.2 Test Coverage Goals
+Layer
+Coverage Target
+Notes
+Domain services
+90% branch
+Highest-value business logic
+Repositories
+80%
+Tested via integration tests primarily
+Controllers
+70%
+Thin layer; integration covers most
+UI (vanilla JS)
+60%
+Heavy reliance on E2E for behavior
+Overall
+≥80% line coverage
+CI fails below threshold
+
+11.3 Test Types & Tools
+Type
+Tool
+Examples
+Unit
+Jest
+PromptSanitizer.scrubEmails() returns scrubbed string
+Integration
+Jest + Supertest + Testcontainers
+POST /messages persists user msg + invokes mocked OpenAI
+Contract
+Pact / OpenAPI validator
+Frontend ↔ Backend schema agreement
+E2E
+Playwright
+Register → verify → chat → search → delete
+Load
+k6
+100 concurrent users, 5 min sustained — verify NFR-01
+Security
+OWASP ZAP (DAST), Snyk (SCA), npm audit
+Pre-release gate
+Accessibility
+axe-core, Lighthouse CI
+Verify WCAG 2.1 AA (NFR-08)
+
+11.4 Test Data Strategy
+Factories (@faker-js/faker) generate realistic test users and messages.
+OpenAI calls mocked in all automated tests via a MockLLMProvider returning canned tokens with configurable delay — keeps tests deterministic and free.
+A single nightly smoke test in the staging environment hits the real OpenAI API to catch contract drift.
+
+12. DEPLOYMENT & MAINTENANCE
+12.1 CI/CD Pipeline (GitHub Actions)
+flowchart LR
+    A[Push / PR] --> B[Lint<br/>ESLint + Prettier]
+    B --> C[Unit Tests<br/>Jest]
+    C --> D[Integration Tests<br/>Testcontainers]
+    D --> E[Security Scan<br/>Snyk + npm audit]
+    E --> F[Build Docker Image]
+    F --> G{Branch?}
+    G -->|main| H[Deploy → Staging]
+    H --> I[E2E Tests<br/>Playwright]
+    I --> J[Smoke Tests]
+    J --> K[Manual Approval]
+    K --> L[Deploy → Prod]
+    L --> M[Post-deploy<br/>Health Check]
+    G -->|feature| N[Deploy Preview<br/>Environment]
+
+12.2 Environment Strategy
+Env
+Purpose
+Data
+Infrastructure
+local
+Dev laptops
+Seeded fake data
+docker-compose
+preview-*
+PR feature previews
+Snapshot of seed data
+Ephemeral container per PR
+staging
+QA & UAT
+Anonymized prod-like data
+Mirrors prod, 1 container task
+production
+Live users
+Real data
+Multi-AZ, ≥2 container tasks
+
+12.3 Containerization
+Dockerfile (multi-stage):
+# ---- builder ----
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY . .
+
+# ---- runtime ----
+FROM node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=builder /app /app
+RUN addgroup -S app && adduser -S app -G app
+USER app
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://localhost:3000/health || exit 1
+CMD ["node", "src/server.js"]
+
+docker-compose.yml (dev): Spins up app, MySQL 8.0, Redis 7, MailHog (for testing email flows).
+12.4 Maintenance Plan
+Activity
+Cadence
+Owner
+Dependency updates (Renovate auto-PRs)
+Weekly
+Eng team
+Security patch (critical CVEs)
+Within 24 h of disclosure
+On-call
+MySQL minor version upgrade
+Quarterly
+DevOps
+Backup restoration drill
+Quarterly
+DevOps
+Penetration test
+Annually
+External
+Performance regression review
+Per release
+Eng lead
+OpenAI model evaluation
+Quarterly
+Product + Eng
+
+
+13. TRACEABILITY MATRIX
+The following matrix demonstrates that every SRS requirement is satisfied by an explicit design element in this SDD.
+Req ID
+Requirement Summary
+SDD Section(s)
+Module / Component
+FR-01
+Student registration with email verification
+§5.1.1, §5.3.1, §6.2 (users, email_tokens)
+Auth Module, Notification Module
+FR-02
+Student login → session
+§5.1.1, §7.2.1, §8.1
+Auth Module
+FR-03
+Password reset (30-min, single-use)
+§5.1.1, §6.2 (email_tokens), §8.5
+Auth Module
+FR-04
+Profile update (re-verify on email change)
+§5.1.1, §7.2.1 (PATCH /me)
+Auth Module
+FR-05
+Admin CRUD on student accounts
+§5.1.5, §5.3.3, §7.2.1 (/admin/users)
+Admin Module
+FR-06
+Send message (≤2000 chars)
+§5.1.2, §7.2.2, §8.3 (Joi schema)
+Chat Module
+FR-07
+Receive AI response (streamed)
+§4.4, §5.1.2, §5.1.4, §7.2.2 (SSE)
+Chat + AI Integration
+FR-08
+Last-N exchanges as context
+§5.1.2 (Context Algorithm)
+Chat Module
+FR-09
+New conversation (clear context)
+§5.4.1, §7.2.1 (POST /conversations)
+Chat Module
+FR-10
+Typing indicator while waiting
+§5.5.1, §7.1.2
+Frontend
+FR-11
+Graceful error when API unavailable (15s)
+§3.4 R-01, §10.1
+AI Integration
+FR-12
+Replace harmful content + log
+§5.1.4, §5.5.1, §6.2 (flagged_content)
+AI Integration, Moderation
+FR-13
+Auto-save query + response + timestamp
+§5.1.3, §6.2 (messages)
+History Module
+FR-14
+Sidebar history list sorted by recency
+§5.1.3, §7.1.2, §6.2 (idx_conv_user_updated)
+History Module
+FR-15
+Load past conversation transcript
+§5.1.3, §7.2.1 (GET /conversations/:id)
+History Module
+FR-16
+Keyword search across history
+§5.1.3 (MySQL FULLTEXT), §6.2
+History Module
+FR-17
+Delete conversation with confirmation
+§5.1.3, §7.2.1 (DELETE)
+History Module, Frontend
+FR-18
+Prompt PII sanitization
+§5.1.4 (PII patterns)
+AI Integration
+FR-19
+Configurable system prompt prepended
+§5.1.4
+AI Integration
+FR-20
+Exponential backoff on 429 (≤3 retries)
+§5.1.4 (Retry Policy)
+AI Integration
+FR-21
+Admin dashboard (KPIs)
+§5.1.5, §9.2 (Redis counters)
+Admin Module
+FR-22
+Flagged content review
+§5.1.5, §6.2 (flagged_content)
+Admin Module
+NFR-01
+≤3s p95 to first token
+§9.1, §10.3, §11.3 (k6 load test)
+Architecture-wide
+NFR-02
+≤2s page load on 4G
+§9.5 (CDN, brotli), §4.5 (vanilla JS minimal bundle)
+Frontend, CDN
+NFR-03
+TLS 1.2+ for all comms
+§8.2
+Edge / LB config
+NFR-04
+bcrypt cost ≥10 + secrets vault
+§5.1.1, §8.2
+Auth Module
+NFR-05
+No raw message logs
+§10.2 (Pino redactor)
+Logging
+NFR-06
+99.5% uptime
+§4.6 (Multi-AZ), §12.2
+Infrastructure
+NFR-07
+1h RTO / 15min RPO
+§6.6
+Database, Backups
+NFR-08
+WCAG 2.1 AA
+§7.1.3, §11.3 (axe-core)
+Frontend
+NFR-09
+Plain English error messages
+§10.1, §7.1.2
+UX writing guide
+NFR-10
+10M messages without >500ms queries
+§6.2 (indexes), §6.3 (partitioning), §9.4
+Database
+
+
+14. APPENDICES
+Appendix A — Glossary
+Context Window — The set of recent messages sent to the LLM along with a new user query, enabling continuity.
+Hallucination — Plausible-sounding but factually incorrect output from an LLM.
+Prompt Injection — An attack where user input manipulates the model into ignoring its system prompt.
+SSE (Server-Sent Events) — A one-way HTTP-based streaming protocol used to push tokens from server to browser.
+System Prompt — A hidden instruction prepended to every LLM call to constrain behavior (e.g., “You are a helpful academic assistant…”).
+Token — The atomic unit of LLM input/output (~¾ of a word in English).
+PITR (Point-In-Time Recovery) — Restoring a database to any moment within the retention window using binary logs.
+Appendix B — Diagram Index
+#
+Diagram
+Section
+1
+System Context
+§2.1
+2
+High-Level Architecture
+§4.2
+3
+Subsystem Decomposition
+§4.3
+4
+Canonical Message Sequence
+§4.4
+5
+Deployment Architecture
+§4.6
+6
+Domain Class Diagram
+§5.2
+7
+Registration Sequence
+§5.3.1
+8
+Admin Deactivate Sequence
+§5.3.3
+9
+Conversation State Machine
+§5.4.1
+10
+Account State Machine
+§5.4.2
+11
+Send Message Activity
+§5.5.1
+12
+Entity-Relationship Diagram
+§6.1
+13
+CI/CD Pipeline
+§12.1
+
+Appendix C — Decision Log
+ID
+Decision
+Rationale
+Alternatives
+Status
+DL-01
+Modular Monolith over Microservices
+Small team, low scale, lower ops cost
+Microservices, Serverless
+✅ Adopted
+DL-02
+SSE over WebSocket
+Unidirectional fits LLM stream; simpler proxying
+WebSockets, polling
+✅ Adopted
+DL-03
+MySQL over PostgreSQL
+Proposal mandates MySQL
+PostgreSQL
+✅ Constrained
+DL-04
+JWT + refresh rotation
+Stateless API; horizontal scale ready
+Server sessions
+✅ Adopted
+DL-05
+bcrypt cost 12 (above NFR-04 min of 10)
+Future-proofing against compute growth
+scrypt, argon2id
+✅ Adopted
+DL-06
+Vanilla JS frontend
+Proposal mandates; smaller bundle
+React, Vue
+✅ Constrained
+DL-07
+Provider abstraction for LLM
+Switch cost insurance (Anthropic/Gemini)
+Hard-code OpenAI
+✅ Adopted
+DL-08
+MySQL FULLTEXT vs Elasticsearch
+FULLTEXT suffices for ≤10M rows; no extra infra
+Elasticsearch, Meilisearch
+✅ Adopted
+DL-09
+Redis for sessions & rate limits
+Sub-ms latency; widely supported
+In-process maps (no HA)
+✅ Adopted
+DL-10
+RS256 (asymmetric) JWT signing
+Public key can be safely shared with future microservices
+HS256
+✅ Adopted
+
+Appendix D — Configuration Reference (Excerpt)
+# Application
+NODE_ENV=production
+PORT=3000
+APP_BASE_URL=https://chatbot.university.edu
+
+# Database
+DB_HOST=db.internal
+DB_PORT=3306
+DB_NAME=chatbot
+DB_USER=chatbot_app
+DB_POOL_MIN=2
+DB_POOL_MAX=20
+
+# Redis
+REDIS_URL=rediss://cache.internal:6379
+
+# Auth
+JWT_PRIVATE_KEY_PATH=/run/secrets/jwt_private.pem
+JWT_PUBLIC_KEY_PATH=/run/secrets/jwt_public.pem
+ACCESS_TOKEN_TTL=15m
+REFRESH_TOKEN_TTL=7d
+BCRYPT_COST=12
+
+# OpenAI
+OPENAI_API_KEY=<<from secrets manager>>
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_TIMEOUT_MS=15000
+OPENAI_MAX_RETRIES=3
+SYSTEM_PROMPT="You are a helpful academic assistant. Provide clear, factual explanations suitable for students."
+CONTEXT_MESSAGE_COUNT=10
+MAX_INPUT_CHARS=2000
+
+# Email
+SMTP_HOST=smtp.sendgrid.net
+SMTP_PORT=587
+SMTP_USER=apikey
+SMTP_PASS=<<from secrets manager>>
+EMAIL_FROM="AI Study Assistant <noreply@university.edu>"
+
+# Logging
+LOG_LEVEL=info
+LOG_REDACT_FIELDS=password,token,authorization,content
+
+
+📌 Document Closure
+This Software Design Document establishes a complete, traceable, and implementable blueprint for the AI-Based Study Assistant Chatbot. Every functional and non-functional requirement from the SRS has been mapped to one or more concrete design elements (see §13). Architectural decisions have been justified against alternatives, and pragmatic compromises (e.g., MySQL over PostgreSQL, vanilla JS over React) are explicitly documented as constraint-driven rather than oversights.
+The next deliverable is the Implementation Phase, beginning with the Sprint 0 setup: repository scaffolding, CI/CD bootstrapping, database migration baseline, and the authentication vertical slice.
